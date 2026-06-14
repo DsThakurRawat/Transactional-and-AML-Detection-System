@@ -3,15 +3,14 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.table import Table
-
-from app.ingest.loader import ingest_csv
-from app.storage.db import SessionLocal, init_db
-from app.storage.queries import compute_summary
-from app.generate.generator import generate_profiles, generate_normal_transactions
-from app.generate.anomalies import inject_anomalies
-from app.generate.adapter import map_kaggle_dataset
-from app.detect.rules import engine as rule_engine
-from app.storage.models import Transaction, Flag
+from data.loader import ingest_csv
+from store.db import SessionLocal, init_db
+from store.queries import compute_summary
+from data.generator import generate_profiles, generate_normal_transactions
+from data.anomalies import inject_anomalies
+from data.adapter import map_kaggle_dataset
+from analyze.rules import engine as rule_engine
+from store.models import Transaction, Flag
 from sqlalchemy import select, delete
 
 app = typer.Typer(help="Transaction-and-AML-Detection-System")

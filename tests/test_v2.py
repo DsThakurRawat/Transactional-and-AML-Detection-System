@@ -1,10 +1,10 @@
 import pytest
 from sqlalchemy import select
-from app.storage.db import SessionLocal, init_db, Base, engine as db_engine
-from app.storage.models import Transaction, Flag
-from app.generate.generator import generate_profiles, generate_normal_transactions
-from app.generate.anomalies import inject_anomalies
-from app.detect.rules import engine as rule_engine
+from store.db import SessionLocal, init_db, Base, engine as db_engine
+from store.models import Transaction, Flag
+from data.generator import generate_profiles, generate_normal_transactions
+from data.anomalies import inject_anomalies
+from analyze.rules import engine as rule_engine
 
 @pytest.fixture(scope="module")
 def setup_data():
@@ -37,7 +37,7 @@ def setup_data():
         session.commit()
     
     # Override settings for tests so we reliably trigger
-    from app.config import get_settings
+    from config import get_settings
     settings = get_settings()
     settings.rule_amount_threshold_usd = 1000.0
     settings.rule_amount_threshold_inr = 80000.0

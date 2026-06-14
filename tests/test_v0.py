@@ -3,11 +3,10 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
-
-from app.ingest.loader import ingest_csv
-from app.storage.db import make_engine
-from app.storage.models import Base
-from app.storage.queries import compute_summary
+from data.loader import ingest_csv
+from store.db import make_engine
+from store.models import Base
+from store.queries import compute_summary
 
 SAMPLE = """transaction_id,account_id,timestamp,amount,currency,merchant,merchant_category,country,channel
 t1,acc1,2026-01-05T10:15:00,1500.00,INR,Amazon,5999,IN,online

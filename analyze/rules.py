@@ -3,9 +3,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-
-from app.storage.models import Transaction, Flag
-from app.config import get_settings, Settings
+from store.models import Transaction, Flag
+from config import get_settings, Settings
 
 class RuleFlag:
     def __init__(self, rule_name: str, reason: str, severity: str):
