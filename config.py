@@ -39,7 +39,8 @@ class Settings(BaseSettings):
         "new_country": 25,
         "new_mcc": 15,
         "high_risk_mcc": 10,
-        "odd_hour": 5
+        "odd_hour": 5,
+        "ml_anomaly": 30
     }
     scoring_band_low: int = 25
     scoring_band_medium: int = 50

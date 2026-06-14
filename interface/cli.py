@@ -11,6 +11,8 @@ from data.adapter import map_kaggle_dataset
 from analyze.rules import engine as rule_engine
 from analyze.scoring import score_transaction
 from analyze.baselines import compute_baselines
+from analyze.features import extract_features
+from analyze.ml import ClassicalAnomalyDetector
 from config import get_settings
 from store.models import Transaction, Flag, Score
 from store.queries import compute_summary, get_top_transactions, get_top_accounts
@@ -127,11 +129,29 @@ def scan() -> None:
             console.print("[yellow]No transactions to scan. Run `ingest` first.[/yellow]")
             return
             
-        console.print("Phase 1/2: Computing per-account behavioral baselines...")
+        console.print("Phase 1/3: Computing per-account behavioral baselines...")
         compute_baselines(session)
+        
+        console.print("Phase 2/3: Loading ML model and computing batch features...")
+        df_features = extract_features(session, transactions)
+        detector = ClassicalAnomalyDetector.load()
+        ml_flags = {}
+        if detector and not df_features.empty:
+            is_anomaly_series = detector.predict(df_features)
+            for tx_id, is_anom in zip(df_features["transaction_id"], is_anomaly_series):
+                if is_anom:
+                    ml_flags[tx_id] = Flag(
+                        transaction_id=tx_id,
+                        account_id="", # Will be set below
+                        rule_name="ml_anomaly",
+                        reason="Transaction flagged by Isolation Forest ML model",
+                        severity="high"
+                    )
+        else:
+            console.print("[yellow]No ML model found or empty features. Degrading gracefully to rules-only mode.[/yellow]")
             
         settings = get_settings()
-        console.print(f"Phase 2/2: Scanning {len(transactions)} transactions with rules...")
+        console.print(f"Phase 3/3: Scanning {len(transactions)} transactions with rules...")
         
         total_flags = 0
         rule_counts = {}
@@ -139,6 +159,12 @@ def scan() -> None:
         for tx in transactions:
             flags = rule_engine.evaluate_transaction(tx, session)
             if flags:
+                # Add ml flag if exists
+                ml_flag = ml_flags.get(tx.transaction_id)
+                if ml_flag:
+                    ml_flag.account_id = tx.account_id
+                    flags.append(ml_flag)
+                    
                 session.add_all(flags)
                 total_flags += len(flags)
                 for f in flags:
@@ -147,6 +173,17 @@ def scan() -> None:
                 score = score_transaction(tx.transaction_id, tx.account_id, flags, settings)
                 session.add(score)
                     
+            elif tx.transaction_id in ml_flags:
+                # Only ML flagged it
+                ml_flag = ml_flags[tx.transaction_id]
+                ml_flag.account_id = tx.account_id
+                flags = [ml_flag]
+                session.add(ml_flag)
+                total_flags += 1
+                rule_counts["ml_anomaly"] = rule_counts.get("ml_anomaly", 0) + 1
+                score = score_transaction(tx.transaction_id, tx.account_id, flags, settings)
+                session.add(score)
+                
         session.commit()
         
     console.print(f"[green]Scan complete! Generated {total_flags} flags.[/green]")
@@ -189,6 +226,25 @@ def top(
     for acc in top_accs:
         acc_table.add_row(acc[0], str(acc[1]), str(acc[2]))
     console.print(acc_table)
+
+@app.command()
+def train() -> None:
+    """Train the classical ML model (Isolation Forest) and persist it."""
+    init_db()
+    with SessionLocal() as session:
+        console.print("Fetching transactions and computing baselines...")
+        compute_baselines(session)
+        df_features = extract_features(session)
+        
+    if df_features.empty:
+        console.print("[red]No transactions available for training.[/red]")
+        return
+        
+    console.print(f"Training Isolation Forest on {len(df_features)} transactions...")
+    detector = ClassicalAnomalyDetector()
+    detector.train(df_features)
+    detector.save()
+    console.print("[green]Training complete. Model persisted to models/iso_forest.joblib.[/green]")
 
 if __name__ == "__main__":
     app()

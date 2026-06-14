@@ -12,6 +12,8 @@ dependencies = [
     "pandas>=3.0.3",
     "numpy>=2.4.6",
     "faker>=40.23.0",
+    "scikit-learn>=1.9.0",
+    "joblib>=1.5.3",
 ]
 
 [dependency-groups]
