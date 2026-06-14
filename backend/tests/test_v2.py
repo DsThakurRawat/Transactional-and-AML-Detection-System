@@ -1,0 +1,109 @@
+import pytest
+from sqlalchemy import select
+from app.storage.db import SessionLocal, init_db, Base, engine as db_engine
+from app.storage.models import Transaction, Flag
+from app.generate.generator import generate_profiles, generate_normal_transactions
+from app.generate.anomalies import inject_anomalies
+from app.detect.rules import engine as rule_engine
+
+@pytest.fixture(scope="module")
+def setup_data():
+    init_db()
+    # Ensure fresh DB for tests
+    Base.metadata.drop_all(bind=db_engine)
+    Base.metadata.create_all(bind=db_engine)
+    
+    profiles = generate_profiles(50, seed=101)
+    df_normal = generate_normal_transactions(profiles, days=30, seed=101)
+    df_final = inject_anomalies(df_normal, anomaly_rate=0.20, seed=101)
+    
+    with SessionLocal() as session:
+        # Load into DB
+        tx_objects = []
+        for _, row in df_final.iterrows():
+            tx = Transaction(
+                transaction_id=row["transaction_id"],
+                account_id=row["account_id"],
+                timestamp=row["timestamp"].to_pydatetime(),
+                amount=row["amount"],
+                currency=row["currency"],
+                merchant=row["merchant"],
+                merchant_category=row["merchant_category"],
+                country=row["country"],
+                channel=row["channel"]
+            )
+            tx_objects.append(tx)
+        session.add_all(tx_objects)
+        session.commit()
+    
+    # Override settings for tests so we reliably trigger
+    from app.config import get_settings
+    settings = get_settings()
+    settings.rule_amount_threshold_usd = 1000.0
+    settings.rule_amount_threshold_inr = 80000.0
+    
+    # Run scan
+    with SessionLocal() as session:
+        transactions = session.scalars(select(Transaction).order_by(Transaction.timestamp)).all()
+        for tx in transactions:
+            flags = rule_engine.evaluate_transaction(tx, session)
+            if flags:
+                session.add_all(flags)
+        session.commit()
+        
+    yield df_final
+
+def test_large_amount_rule(setup_data):
+    df = setup_data
+    large_amount_tx_ids = set(df[df['anomaly_type'] == 'large_amount']['transaction_id'])
+    
+    with SessionLocal() as session:
+        flags = session.scalars(select(Flag).where(Flag.rule_name == 'amount')).all()
+        flagged_tx_ids = {f.transaction_id for f in flags}
+        
+    assert len(large_amount_tx_ids) > 0, "No large_amount anomalies generated"
+    # Ensure all large amounts are flagged
+    missing = large_amount_tx_ids - flagged_tx_ids
+    assert not missing, f"Rule 'amount' missed large_amount transactions: {missing}"
+
+def test_velocity_rule(setup_data):
+    df = setup_data
+    velocity_tx_ids = set(df[df['anomaly_type'] == 'velocity_fraud']['transaction_id'])
+    
+    with SessionLocal() as session:
+        flags = session.scalars(select(Flag).where(Flag.rule_name == 'velocity')).all()
+        flagged_tx_ids = {f.transaction_id for f in flags}
+        
+    assert len(velocity_tx_ids) > 0, "No velocity anomalies generated"
+    # Velocity flags the burst. Some initial txns in the burst might not be flagged because count < 5.
+    # We just need to check there is significant overlap.
+    caught = velocity_tx_ids.intersection(flagged_tx_ids)
+    assert len(caught) > 0, "Velocity rule completely missed velocity_fraud anomalies"
+
+def test_structuring_rule(setup_data):
+    df = setup_data
+    structuring_tx_ids = set(df[df['anomaly_type'] == 'structuring']['transaction_id'])
+    
+    with SessionLocal() as session:
+        flags = session.scalars(select(Flag).where(Flag.rule_name == 'structuring')).all()
+        flagged_tx_ids = {f.transaction_id for f in flags}
+        
+    assert len(structuring_tx_ids) > 0, "No structuring anomalies generated"
+    # Structuring flags transactions when count >= 2. 
+    caught = structuring_tx_ids.intersection(flagged_tx_ids)
+    assert len(caught) > 0, "Structuring rule completely missed structuring anomalies"
+
+def test_country_mismatch_rule(setup_data):
+    df = setup_data
+    geo_tx_ids = set(df[df['anomaly_type'] == 'geo_anomaly']['transaction_id'])
+    
+    with SessionLocal() as session:
+        flags = session.scalars(select(Flag).where(Flag.rule_name == 'country_mismatch')).all()
+        flagged_tx_ids = {f.transaction_id for f in flags}
+        
+    assert len(geo_tx_ids) > 0, "No geo anomalies generated"
+    missing = geo_tx_ids - flagged_tx_ids
+    # Due to >= 5 requirement, some early ones might be missed, but we should catch at least one
+    # if it occurred late enough.
+    caught = geo_tx_ids.intersection(flagged_tx_ids)
+    assert len(caught) > 0, "Country mismatch missed all geo_anomaly transactions"
