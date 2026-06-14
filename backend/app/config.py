@@ -13,6 +13,23 @@ class Settings(BaseSettings):
     # never in code.
     database_url: str = "sqlite:///txn.db"
 
+    # Rule Engine Config
+    rule_amount_threshold_usd: float = 5000.0
+    rule_amount_threshold_inr: float = 400000.0
+    
+    rule_velocity_window_minutes: int = 15
+    rule_velocity_count: int = 5
+    
+    # AML structuring config
+    rule_structuring_threshold_usd: float = 10000.0
+    rule_structuring_threshold_inr: float = 50000.0
+    rule_structuring_window_hours: int = 72
+    
+    rule_odd_hour_start: int = 2
+    rule_odd_hour_end: int = 5
+    
+    rule_high_risk_mcc: list[str] = ["5999", "6011", "6012"]
+
 
 @lru_cache
 def get_settings() -> Settings:

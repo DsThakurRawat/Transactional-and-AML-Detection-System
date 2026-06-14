@@ -10,8 +10,11 @@ from app.storage.queries import compute_summary
 from app.generate.generator import generate_profiles, generate_normal_transactions
 from app.generate.anomalies import inject_anomalies
 from app.generate.adapter import map_kaggle_dataset
+from app.detect.rules import engine as rule_engine
+from app.storage.models import Transaction, Flag
+from sqlalchemy import select
 
-app = typer.Typer(help="Transaction-and-AML-Detection-System (v0)")
+app = typer.Typer(help="Transaction-and-AML-Detection-System")
 console = Console()
 
 
@@ -102,6 +105,45 @@ def import_real(
     console.print(f"Mapping real dataset from {input_csv} to {out}...")
     map_kaggle_dataset(str(input_csv), str(out))
     console.print("[green]Mapping complete.[/green]")
+
+
+@app.command()
+def scan() -> None:
+    """Run rule-based detection on stored transactions and persist flags."""
+    init_db()
+    with SessionLocal() as session:
+        # Get all transactions
+        # In a real system, we'd paginate or filter by unscanned.
+        stmt = select(Transaction).order_by(Transaction.timestamp)
+        transactions = session.scalars(stmt).all()
+        
+        if not transactions:
+            console.print("[yellow]No transactions to scan. Run `ingest` first.[/yellow]")
+            return
+            
+        console.print(f"Scanning {len(transactions)} transactions...")
+        
+        total_flags = 0
+        rule_counts = {}
+        
+        for tx in transactions:
+            flags = rule_engine.evaluate_transaction(tx, session)
+            if flags:
+                session.add_all(flags)
+                total_flags += len(flags)
+                for f in flags:
+                    rule_counts[f.rule_name] = rule_counts.get(f.rule_name, 0) + 1
+                    
+        session.commit()
+        
+    console.print(f"[green]Scan complete! Generated {total_flags} flags.[/green]")
+    if rule_counts:
+        table = Table(title="Flags by Rule")
+        table.add_column("Rule")
+        table.add_column("Count", justify="right")
+        for rule, count in rule_counts.items():
+            table.add_row(rule, str(count))
+        console.print(table)
 
 
 if __name__ == "__main__":
