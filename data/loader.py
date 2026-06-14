@@ -5,9 +5,8 @@ from pathlib import Path
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from app.ingest.schema import TransactionBase
-from app.storage.models import Transaction
+from data.schema import TransactionBase
+from store.models import Transaction
 
 
 @dataclass

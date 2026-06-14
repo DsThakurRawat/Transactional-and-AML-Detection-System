@@ -4,8 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
-from app.storage.models import Transaction
+from store.models import Transaction
 
 
 @dataclass
