@@ -2,10 +2,10 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.storage.models import Transaction, Flag
-from app.config import get_settings
+from app.config import get_settings, Settings
 
 class RuleFlag:
     def __init__(self, rule_name: str, reason: str, severity: str):
@@ -16,14 +16,13 @@ class RuleFlag:
 class Rule:
     name: str = "base_rule"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
         raise NotImplementedError
 
 class LargeAmountRule(Rule):
     name = "amount"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
-        settings = get_settings()
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
         if tx.currency == "INR" and float(tx.amount) > settings.rule_amount_threshold_inr:
             return RuleFlag(rule_name=self.name, reason=f"Amount {tx.amount} exceeds INR threshold {settings.rule_amount_threshold_inr}", severity="high")
         elif tx.currency != "INR" and float(tx.amount) > settings.rule_amount_threshold_usd:
@@ -33,8 +32,7 @@ class LargeAmountRule(Rule):
 class HighRiskMCCRule(Rule):
     name = "high_risk_mcc"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
-        settings = get_settings()
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
         if tx.merchant_category in settings.rule_high_risk_mcc:
             return RuleFlag(rule_name=self.name, reason=f"Transaction in high-risk merchant category: {tx.merchant_category}", severity="medium")
         return None
@@ -42,8 +40,8 @@ class HighRiskMCCRule(Rule):
 class OddHourRule(Rule):
     name = "odd_hour"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
-        settings = get_settings()
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
+        # tx.timestamp is naive but representing local/system time from generator.
         if settings.rule_odd_hour_start <= tx.timestamp.hour <= settings.rule_odd_hour_end:
             return RuleFlag(rule_name=self.name, reason=f"Transaction at odd hour: {tx.timestamp.hour}:00", severity="low")
         return None
@@ -51,27 +49,25 @@ class OddHourRule(Rule):
 class VelocityRule(Rule):
     name = "velocity"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
-        settings = get_settings()
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
         window_start = tx.timestamp - timedelta(minutes=settings.rule_velocity_window_minutes)
         
-        stmt = select(Transaction).where(
+        # Note: Re-queries per tx; acceptable for v2.
+        stmt = select(func.count()).select_from(Transaction).where(
             Transaction.account_id == tx.account_id,
             Transaction.timestamp <= tx.timestamp,
-            Transaction.timestamp >= window_start,
-            Transaction.transaction_id != tx.transaction_id
+            Transaction.timestamp >= window_start
         )
-        recent_txs = session.scalars(stmt).all()
+        count = session.scalar(stmt)
         
-        if len(recent_txs) + 1 >= settings.rule_velocity_count:
-            return RuleFlag(rule_name=self.name, reason=f"{len(recent_txs) + 1} transactions within {settings.rule_velocity_window_minutes} minutes", severity="critical")
+        if count >= settings.rule_velocity_count:
+            return RuleFlag(rule_name=self.name, reason=f"{count} transactions within {settings.rule_velocity_window_minutes} minutes", severity="critical")
         return None
 
 class StructuringRule(Rule):
     name = "structuring"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
-        settings = get_settings()
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
         window_start = tx.timestamp - timedelta(hours=settings.rule_structuring_window_hours)
         
         if tx.currency == "INR":
@@ -79,30 +75,43 @@ class StructuringRule(Rule):
         else:
             threshold = settings.rule_structuring_threshold_usd
             
-        stmt = select(Transaction).where(
+        # We look for transactions in the window that are 80% to 100% of the threshold
+        # If there are >= 2 such transactions, we flag for structuring.
+        stmt = select(func.count()).select_from(Transaction).where(
             Transaction.account_id == tx.account_id,
             Transaction.timestamp <= tx.timestamp,
-            Transaction.timestamp >= window_start
+            Transaction.timestamp >= window_start,
+            Transaction.amount >= threshold * 0.80,
+            Transaction.amount < threshold
         )
-        recent_txs = session.scalars(stmt).all()
+        count = session.scalar(stmt)
         
-        total_sum = sum(float(t.amount) for t in recent_txs)
-        
-        if len(recent_txs) > 1 and threshold * 0.85 <= total_sum < threshold:
-            return RuleFlag(rule_name=self.name, reason=f"Structuring pattern detected: {len(recent_txs)} transactions summing to {total_sum:.2f} within {settings.rule_structuring_window_hours} hours", severity="critical")
+        if count >= 2:
+            return RuleFlag(rule_name=self.name, reason=f"Structuring pattern: {count} transactions just under threshold within {settings.rule_structuring_window_hours}h", severity="critical")
         return None
 
 class CountryMismatchRule(Rule):
     name = "country_mismatch"
     
-    def evaluate(self, tx: Transaction, session: Session) -> Optional[RuleFlag]:
+    def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
+        # Get count of previous transactions
+        count_stmt = select(func.count()).select_from(Transaction).where(
+            Transaction.account_id == tx.account_id,
+            Transaction.timestamp < tx.timestamp
+        )
+        prior_tx_count = session.scalar(count_stmt)
+        
+        # Require history to prevent false flags on new accounts
+        if prior_tx_count < 5:
+            return None
+            
         stmt = select(Transaction.country).where(
             Transaction.account_id == tx.account_id,
             Transaction.timestamp < tx.timestamp
         ).distinct()
         previous_countries = session.scalars(stmt).all()
         
-        if previous_countries and tx.country not in previous_countries:
+        if tx.country not in previous_countries:
             return RuleFlag(rule_name=self.name, reason=f"Country mismatch: {tx.country} not in account history", severity="high")
         return None
 
@@ -118,12 +127,14 @@ class RuleEngine:
         ]
         
     def evaluate_transaction(self, tx: Transaction, session: Session) -> List[Flag]:
+        settings = get_settings()
         flags = []
         for rule in self.rules:
-            result = rule.evaluate(tx, session)
+            result = rule.evaluate(tx, session, settings)
             if result:
                 flag = Flag(
                     transaction_id=tx.transaction_id,
+                    account_id=tx.account_id,
                     rule_name=result.rule_name,
                     reason=result.reason,
                     severity=result.severity

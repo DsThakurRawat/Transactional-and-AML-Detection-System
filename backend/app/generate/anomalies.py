@@ -6,7 +6,14 @@ import pandas as pd
 import numpy as np
 
 def inject_fraud_large_amount(df: pd.DataFrame, index: int, py_rng: random.Random, multiplier: float = 20.0):
-    df.at[index, 'amount'] = round(df.at[index, 'amount'] * multiplier, 2)
+    new_amt = round(df.at[index, 'amount'] * multiplier, 2)
+    # Ensure it breaches standard blunt thresholds
+    if df.at[index, 'currency'] == "INR":
+        new_amt = max(new_amt, 500000.0)
+    else:
+        new_amt = max(new_amt, 15000.0)
+        
+    df.at[index, 'amount'] = new_amt
     df.at[index, 'is_anomaly'] = True
     df.at[index, 'anomaly_type'] = "large_amount"
 
@@ -68,8 +75,8 @@ def inject_anomalies(df: pd.DataFrame, anomaly_rate: float, seed: int) -> pd.Dat
     if df.empty:
         return df
         
-    rng = np.random.default_rng(seed)
-    py_rng = random.Random(seed)
+    rng = np.random.default_rng(seed + 1000)
+    py_rng = random.Random(seed + 1000)
     
     target_anomaly_rows = int(len(df) * anomaly_rate)
     current_anomaly_rows = 0

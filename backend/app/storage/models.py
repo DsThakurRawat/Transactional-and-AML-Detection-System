@@ -31,6 +31,7 @@ class Flag(Base):
     __tablename__ = "flags"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     transaction_id: Mapped[str] = mapped_column(String, index=True)
+    account_id: Mapped[str] = mapped_column(String, index=True)
     rule_name: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(String)
     severity: Mapped[str] = mapped_column(String)

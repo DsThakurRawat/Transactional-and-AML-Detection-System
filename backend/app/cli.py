@@ -12,7 +12,7 @@ from app.generate.anomalies import inject_anomalies
 from app.generate.adapter import map_kaggle_dataset
 from app.detect.rules import engine as rule_engine
 from app.storage.models import Transaction, Flag
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 app = typer.Typer(help="Transaction-and-AML-Detection-System")
 console = Console()
@@ -112,6 +112,10 @@ def scan() -> None:
     """Run rule-based detection on stored transactions and persist flags."""
     init_db()
     with SessionLocal() as session:
+        # Clear prior flags to ensure idempotency
+        session.execute(delete(Flag))
+        session.commit()
+        
         # Get all transactions
         # In a real system, we'd paginate or filter by unscanned.
         stmt = select(Transaction).order_by(Transaction.timestamp)
