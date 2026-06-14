@@ -12,6 +12,7 @@ from core.store.queries import compute_summary, get_top_transactions, get_top_ac
 from sqlalchemy import select, delete
 from core.pipeline import run_analyzer
 import analyzers.aml.analyzer
+import analyzers.reconciliation.analyzer
 
 app = typer.Typer(help="Transaction-and-AML-Detection-System")
 console = Console()
@@ -38,6 +39,45 @@ def ingest(
         console.print(f"[red]Invalid rows[/red] (showing {len(shown)} of {len(result.errors)}):")
         for line_no, msg in shown:
             console.print(f"  line {line_no}: {msg}")
+
+@app.command()
+def ingest_recon(
+    num_records: int = typer.Option(1000, help="Number of records to generate"),
+    anomaly_rate: float = typer.Option(0.05, help="Rate of discrepancies to inject"),
+) -> None:
+    """Generate and ingest synthetic ledger entries for reconciliation."""
+    from data.reconciliation import generate_reconciliation_data
+    from analyzers.reconciliation.models import LedgerEntry
+    init_db()
+    
+    console.print(f"Generating {num_records} ledger entries with {anomaly_rate*100}% anomalies...")
+    df = generate_reconciliation_data(num_records, anomaly_rate)
+    
+    with SessionLocal() as session:
+        # Clear existing
+        session.execute(delete(LedgerEntry))
+        
+        entries = []
+        for _, row in df.iterrows():
+            entry = LedgerEntry(
+                id=row['id'],
+                source=row['source'],
+                external_ref=row['external_ref'],
+                amount=row['amount'],
+                currency=row['currency'],
+                direction=row['direction'],
+                transaction_date=row['transaction_date'],
+                settlement_date=row['settlement_date'],
+                status=row['status'],
+                is_anomaly=row['is_anomaly'],
+                anomaly_type=row['anomaly_type']
+            )
+            entries.append(entry)
+            
+        session.add_all(entries)
+        session.commit()
+        
+    console.print(f"[green]Successfully ingested {len(entries)} ledger entries.[/green]")
 
 
 @app.command()
