@@ -12,9 +12,11 @@ class Dispute(Base):
     reason_code: Mapped[str] = mapped_column(String)
     amount: Mapped[Decimal] = mapped_column(Numeric(20, 4))
     currency: Mapped[str] = mapped_column(String(3))
-    status: Mapped[str] = mapped_column(String, default="open") # open, won, lost
+    status: Mapped[str] = mapped_column(String, default="open") # open, won, lost, represented
     created_at: Mapped[datetime] = mapped_column(DateTime)
     deadline: Mapped[datetime] = mapped_column(DateTime)
+    evidence_collected: Mapped[bool] = mapped_column(Integer, default=0)
+    rebuttal_draft: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class Case(Base):
     __tablename__ = "cases"

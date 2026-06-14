@@ -39,7 +39,8 @@ class CategorizationAnalyzer(Analyzer):
             )
             categories.append(cat_obj)
             
-            # Emit finding for high-risk categories
+            # Emit finding for high-risk categories or low confidence
+            status = "needs_review" if conf < 0.7 else "open"
             if category in ["crypto", "gambling"]:
                 finding = Finding(
                     id=str(uuid.uuid4()),
@@ -47,11 +48,11 @@ class CategorizationAnalyzer(Analyzer):
                     entity_type="transaction",
                     entity_id=tx.transaction_id,
                     finding_type="high_risk_category",
-                    score=80.0,
-                    band="high",
-                    status="open",
-                    summary=f"Transaction assigned to high-risk category: {category}",
-                    payload_json={"merchant": tx.merchant, "category": category, "confidence": conf}
+                    score=80.0 if category == "crypto" else 90.0,
+                    band="high" if category == "crypto" else "critical",
+                    status=status,
+                    summary=f"Transaction assigned to high-risk category: {category} (conf: {conf:.2f})",
+                    payload_json={"merchant": tx.merchant, "category": category, "confidence": conf, "source": source}
                 )
                 session.add(finding)
                 findings_count += 1
@@ -62,6 +63,35 @@ class CategorizationAnalyzer(Analyzer):
         return RunResult(findings_count, f"Categorized {len(transactions)} transactions, flagged {findings_count}")
 
     def evaluate(self, session: Session) -> Optional[str]:
-        return None
+        from sklearn.metrics import f1_score, confusion_matrix
+        from analyzers.categorization.engine import categorize_merchant
+        
+        # Labeled test set representing the messy strings the generator produces
+        test_data = [
+            ("PAYPAL *WALMART STORE INC", "retail"),
+            ("POS DEBIT MCDONALDS #445", "food_and_dining"),
+            ("WWW.BINANCE LLC", "crypto"),
+            ("SQ *DRAFTKINGS", "gambling"),
+            ("TST* APPLE STORE", "electronics"),
+            ("AMAZON", "retail"),
+            ("CHEVRON STORE 123", "auto_and_transport"),
+            ("UNKNOWN MERCHANT", "unknown")
+        ]
+        
+        y_true = [t[1] for t in test_data]
+        y_pred = []
+        for merchant, _ in test_data:
+            cat, _, _ = categorize_merchant(merchant)
+            y_pred.append(cat)
+            
+        f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+        cm = confusion_matrix(y_true, y_pred)
+        
+        labels = sorted(list(set(y_true + y_pred)))
+        
+        report = f"Categorization Model Evaluation:\nMacro-F1 Score: {f1:.4f}\n"
+        report += f"Labels: {labels}\n"
+        report += f"Confusion Matrix:\n{cm}"
+        return report
 
 register(CategorizationAnalyzer())

@@ -17,7 +17,46 @@ class AccountProfile(BaseModel):
     currency: str
 
 def get_random_merchant(mcc: str, country: str, py_rng: random.Random) -> str:
-    return f"Merchant_{mcc}_{country}_{py_rng.randint(1, 100)}"
+    # Introduce real-world messiness
+    base_merchants = {
+        "5411": ["Walmart", "Target", "Whole Foods", "Kroger", "Safeway"],
+        "5812": ["McDonalds", "Starbucks", "Chipotle", "Subway", "Taco Bell"],
+        "5814": ["Burger King", "KFC", "Dominos", "Wendys"],
+        "5999": ["Amazon", "Ebay", "Etsy", "AliExpress"],
+        "5732": ["Best Buy", "Apple Store", "Samsung", "Microcenter"],
+        "5541": ["Shell", "Chevron", "Exxon", "BP"]
+    }
+    
+    # Also add some high risk categories we want the classifier to catch
+    high_risk_merchants = {
+        "crypto": ["Binance", "Coinbase", "Kraken", "Gemini", "Crypto.com"],
+        "gambling": ["DraftKings", "FanDuel", "BetMGM", "Caesars", "Bovada"]
+    }
+    
+    # 2% chance of being a high risk category just to have them in the data
+    if py_rng.random() < 0.02:
+        cat = py_rng.choice(list(high_risk_merchants.keys()))
+        name = py_rng.choice(high_risk_merchants[cat])
+    else:
+        candidates = base_merchants.get(mcc, ["GenericStore"])
+        name = py_rng.choice(candidates)
+        
+    # Make it messy
+    prefixes = ["", "PAYPAL *", "SQ *", "TST* ", "POS DEBIT ", "WWW."]
+    suffixes = ["", " INC", " LLC", f" {country}", " STORE 123", " #445"]
+    
+    prefix = py_rng.choice(prefixes)
+    suffix = py_rng.choice(suffixes)
+    
+    raw = f"{prefix}{name}{suffix}"
+    
+    # Further mess: uppercase, strip spaces, etc.
+    if py_rng.random() < 0.5:
+        raw = raw.upper()
+    if py_rng.random() < 0.2:
+        raw = raw.replace(" ", "")
+        
+    return raw
 
 def generate_profiles(num_accounts: int, seed: int) -> List[AccountProfile]:
     rng = np.random.default_rng(seed)

@@ -240,6 +240,21 @@ def evaluate() -> None:
     result = subprocess.run([sys.executable, "-m", "pytest", "tests/aml/test_v8.py", "-s", "-q"], capture_output=True, text=True)
     if result.returncode == 0:
         console.print("[green]Scorecard successfully generated at SCORECARD.md[/green]")
+        
+        # Append evaluations from all platform analyzers
+        from core.registry import list_analyzers, get_analyzer
+        with SessionLocal() as session:
+            with open("SCORECARD.md", "a") as f:
+                for name in list_analyzers():
+                    if name != "aml": # AML is handled by test_v8.py scorecard
+                        analyzer = get_analyzer(name)
+                        try:
+                            eval_report = analyzer.evaluate(session)
+                            if eval_report:
+                                f.write(f"\n\n## {analyzer.__class__.__name__}\n```\n{eval_report}\n```\n")
+                        except Exception as e:
+                            f.write(f"\n\n## {analyzer.__class__.__name__}\nFailed to evaluate: {str(e)}\n")
+                            
         try:
             with open("SCORECARD.md", "r") as f:
                 console.print(f.read())
