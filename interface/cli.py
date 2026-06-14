@@ -233,8 +233,10 @@ def top(
     console.print(acc_table)
 
 @app.command()
-def train() -> None:
-    """Train the classical ML model (Isolation Forest) and persist it."""
+def train(
+    labels_csv: Path = typer.Option(Path("synthetic_data.csv"), help="CSV with 'is_anomaly' labels for supervised training")
+) -> None:
+    """Train the classical ML model (Ensemble) and persist it."""
     init_db()
     with SessionLocal() as session:
         console.print("Fetching transactions and computing baselines...")
@@ -247,7 +249,21 @@ def train() -> None:
         
     console.print(f"Training Ensemble Detector on {len(df_features)} transactions...")
     detector = EnsembleAnomalyDetector()
-    detector.train(df_features) # Unsupervised only in CLI
+    
+    y_train = None
+    if labels_csv.exists():
+        console.print(f"Loading labels from {labels_csv} for supervised training...")
+        import pandas as pd
+        df_labels = pd.read_csv(labels_csv)
+        if 'transaction_id' in df_labels.columns and 'is_anomaly' in df_labels.columns:
+            # Merge to align row order
+            df_merged = df_features[['transaction_id']].merge(df_labels[['transaction_id', 'is_anomaly']], on='transaction_id', how='left')
+            y_train = df_merged['is_anomaly'].fillna(False).astype(bool)
+            console.print(f"Found {y_train.sum()} anomalies in labels. Booster will be enabled.")
+        else:
+            console.print("[yellow]Labels CSV missing 'transaction_id' or 'is_anomaly' columns. Falling back to unsupervised mode.[/yellow]")
+            
+    detector.train(df_features, y_train=y_train)
     detector.save()
     console.print("[green]Training complete. Model persisted to models/ensemble.joblib.[/green]")
 
