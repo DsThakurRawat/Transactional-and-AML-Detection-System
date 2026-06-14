@@ -64,8 +64,40 @@ class ReconciliationAnalyzer(Analyzer):
 
     def evaluate(self, session: Session) -> Optional[str]:
         # precision and recall for anomalies
+        from analyzers.reconciliation.models import LedgerEntry
+        from core.store.models import Finding
         from sqlalchemy import func
-        # Actual evaluation would compare is_anomaly on LedgerEntry vs Findings
-        return "Not implemented yet"
+        
+        # We can find total injected anomalies by looking at is_anomaly
+        total_anomalies = session.scalar(select(func.count(LedgerEntry.id)).where(LedgerEntry.is_anomaly == True))
+        if total_anomalies == 0:
+            return "No anomalies found in ledger data. Cannot evaluate recall."
+            
+        # Actual evaluation compares is_anomaly on LedgerEntry vs Findings
+        anomalous_entries = session.scalars(select(LedgerEntry).where(LedgerEntry.is_anomaly == True)).all()
+        anomaly_ids = {e.id for e in anomalous_entries}
+        
+        findings = session.scalars(select(Finding).where(Finding.analyzer == "reconciliation")).all()
+        flagged_ids = set()
+        for f in findings:
+            if f.payload_json:
+                if f.payload_json.get("internal_entry_id"):
+                    flagged_ids.add(f.payload_json.get("internal_entry_id"))
+                if f.payload_json.get("processor_entry_id"):
+                    flagged_ids.add(f.payload_json.get("processor_entry_id"))
+                    
+        true_positives = len(anomaly_ids.intersection(flagged_ids))
+        false_positives = len(flagged_ids - anomaly_ids)
+        
+        recall = (true_positives / total_anomalies) * 100 if total_anomalies > 0 else 0.0
+        precision = (true_positives / len(flagged_ids)) * 100 if flagged_ids else 100.0
+        
+        report = f"Reconciliation Evaluation:\n"
+        report += f"Total Anomalies Injected: {total_anomalies}\n"
+        report += f"Total Flagged by Matcher: {len(flagged_ids)}\n"
+        report += f"Recall: {recall:.1f}%\n"
+        report += f"Precision: {precision:.1f}%\n"
+        
+        return report
 
 register(ReconciliationAnalyzer())

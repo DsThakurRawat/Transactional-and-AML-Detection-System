@@ -50,9 +50,11 @@ def generate_scorecard(df_test: pd.DataFrame, rules_only_score: pd.Series, ensem
             e_type_rec = recall_score(y_true[mask], ensemble_preds[mask], zero_division=0)
             type_metrics.append((t, r_type_rec, e_type_rec))
             
-    md = f"""# AML Detection System Scorecard
+    md = f"""# Platform Scorecard (All Analyzers)
+    
+This scorecard evaluates the end-to-end performance of all platform analyzers.
 
-## Overall Performance Lift (Rules vs Ensemble)
+## AML Detection Lift (Rules vs Ensemble)
 *Operating Point: Score >= 50*
 
 | Metric | Rules Only (v2-v4) | Rules + ML Ensemble (v5) | Lift |

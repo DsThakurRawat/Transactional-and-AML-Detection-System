@@ -1,6 +1,8 @@
-# AML Detection System Scorecard
+# Platform Scorecard (All Analyzers)
+    
+This scorecard evaluates the end-to-end performance of all platform analyzers.
 
-## Overall Performance Lift (Rules vs Ensemble)
+## AML Detection Lift (Rules vs Ensemble)
 *Operating Point: Score >= 50*
 
 | Metric | Rules Only (v2-v4) | Rules + ML Ensemble (v5) | Lift |
@@ -30,7 +32,12 @@
 
 ## ReconciliationAnalyzer
 ```
-Not implemented yet
+Reconciliation Evaluation:
+Total Anomalies Injected: 96
+Total Flagged by Matcher: 81
+Recall: 84.4%
+Precision: 100.0%
+
 ```
 
 
@@ -53,9 +60,9 @@ Confusion Matrix:
 ## DisputeAnalyzer
 ```
 Dispute Workflow Metrics:
-Total Disputes: 50
-Open: 15
-Win Rate: 42.9% (15 won, 20 lost)
+Total Disputes: 100
+Open: 37
+Win Rate: 42.9% (27 won, 36 lost)
 
 ```
 

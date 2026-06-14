@@ -61,7 +61,7 @@ def test_generate_scorecard(setup_data, db_session_factory, tmp_path):
     scorecard_path = "SCORECARD.md"
     md = generate_scorecard(df_test, rules_scores, ensemble_scores, output_path=scorecard_path)
     
-    assert "Overall Performance Lift" in md
+    assert "AML Detection Lift" in md
     assert os.path.exists(scorecard_path)
     
     # Read and print to verify
