@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     
     # AML structuring config
     rule_structuring_threshold_usd: float = 10000.0
-    rule_structuring_threshold_inr: float = 50000.0
+    rule_structuring_threshold_inr: float = 800000.0
     rule_structuring_window_hours: int = 72
     
     rule_odd_hour_start: int = 2

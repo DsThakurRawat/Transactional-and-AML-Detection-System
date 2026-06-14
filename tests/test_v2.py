@@ -55,6 +55,7 @@ def setup_data(db_session_factory):
         session.commit()
         
     yield df_final
+    get_settings.cache_clear()
 
 def test_large_amount_rule(setup_data, db_session_factory):
     df = setup_data

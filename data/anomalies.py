@@ -5,6 +5,8 @@ from datetime import timedelta
 import pandas as pd
 import numpy as np
 
+from config import get_settings
+
 def inject_fraud_large_amount(df: pd.DataFrame, index: int, py_rng: random.Random, multiplier: float = 20.0):
     new_amt = round(df.at[index, 'amount'] * multiplier, 2)
     # Ensure it breaches standard blunt thresholds
@@ -45,10 +47,11 @@ def inject_fraud_geo(df: pd.DataFrame, index: int):
 
 def inject_aml_structuring(df: pd.DataFrame, index: int, py_rng: random.Random) -> pd.DataFrame:
     base_row = df.iloc[index].copy()
+    settings = get_settings()
     if base_row['currency'] == "INR":
-        threshold = 50000.0
+        threshold = settings.rule_structuring_threshold_inr
     else:
-        threshold = 10000.0
+        threshold = settings.rule_structuring_threshold_usd
         
     num_tx = py_rng.randint(3, 5)
     # Generate amounts that are individually close to the reporting threshold

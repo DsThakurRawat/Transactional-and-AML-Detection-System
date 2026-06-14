@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric, String
+from sqlalchemy import DateTime, Numeric, String, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -29,8 +29,10 @@ class Transaction(Base):
 
 class Flag(Base):
     __tablename__ = "flags"
+    __table_args__ = (UniqueConstraint('transaction_id', 'rule_name', name='uix_transaction_rule'),)
+    
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    transaction_id: Mapped[str] = mapped_column(String, index=True)
+    transaction_id: Mapped[str] = mapped_column(String, ForeignKey("transactions.transaction_id"), index=True)
     account_id: Mapped[str] = mapped_column(String, index=True)
     rule_name: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(String)

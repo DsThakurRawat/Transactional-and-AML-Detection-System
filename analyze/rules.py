@@ -1,8 +1,9 @@
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
+from decimal import Decimal
 from store.models import Transaction, Flag
 from config import get_settings, Settings
 
@@ -22,9 +23,9 @@ class LargeAmountRule(Rule):
     name = "amount"
     
     def evaluate(self, tx: Transaction, session: Session, settings: Settings) -> Optional[RuleFlag]:
-        if tx.currency == "INR" and float(tx.amount) > settings.rule_amount_threshold_inr:
+        if tx.currency == "INR" and tx.amount > Decimal(str(settings.rule_amount_threshold_inr)):
             return RuleFlag(rule_name=self.name, reason=f"Amount {tx.amount} exceeds INR threshold {settings.rule_amount_threshold_inr}", severity="high")
-        elif tx.currency != "INR" and float(tx.amount) > settings.rule_amount_threshold_usd:
+        elif tx.currency != "INR" and tx.amount > Decimal(str(settings.rule_amount_threshold_usd)):
             return RuleFlag(rule_name=self.name, reason=f"Amount {tx.amount} exceeds USD threshold {settings.rule_amount_threshold_usd}", severity="high")
         return None
 
