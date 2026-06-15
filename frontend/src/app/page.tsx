@@ -6,111 +6,118 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Database } from 'lucide-react';
 
-// Force dynamic rendering and revalidate every 10s
 export const revalidate = 10;
 export const dynamic = 'force-dynamic';
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-text-muted/70 font-medium mb-3">
+      {children}
+      <span className="flex-1 h-px bg-border" />
+    </div>
+  );
+}
 
 export default async function OverviewPage() {
   try {
     const [stats, topFindings] = await Promise.all([
       fetchStats(),
-      fetchTopFindings(5)
+      fetchTopFindings(5),
     ]);
 
     const isSystemEmpty = stats.total === 0;
+    const critical = stats.by_band['critical'] || 0;
 
     return (
-      <div className="flex flex-col gap-8 max-w-7xl mx-auto">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-xl font-semibold text-text">Platform Overview</h1>
-          <p className="text-sm text-text-muted">Unified compliance queue across all analyzers.</p>
+      <div className="flex flex-col max-w-7xl mx-auto">
+        <div className="flex flex-col gap-1.5 mb-7">
+          <h1 className="text-xl font-semibold text-text">Platform overview</h1>
+          <p className="text-sm text-text-muted">Unified compliance queue across all five analyzers.</p>
         </div>
 
-        {/* 1. Stat Cards Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard 
-            title="Total Transactions" 
-            value="--" 
-            hint="Ingested payload"
+        {/* 1. Posture — stat cards (now fully wired, no more "--") */}
+        <Eyebrow>Posture</Eyebrow>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mb-8">
+          <StatCard
+            title="Transactions"
+            value={stats.total_transactions.toLocaleString()}
+            hint={`across ${stats.accounts_monitored} accounts`}
           />
-          <StatCard 
-            title="Open Findings" 
-            value={stats.total.toLocaleString()} 
-            hint="Across all analyzers"
+          <StatCard
+            title="Open findings"
+            value={stats.total.toLocaleString()}
+            hint="all analyzers"
           />
-          <StatCard 
-            title="Critical Risk" 
-            value={(stats.by_band['critical'] || 0).toLocaleString()} 
+          <StatCard
+            title="Critical risk"
+            value={critical.toLocaleString()}
             band="critical"
-            hint="Requires immediate action"
+            hint="needs action now"
           />
-          <StatCard 
-            title="Accounts Monitored" 
-            value="--" 
+          <StatCard
+            title="Accounts monitored"
+            value={stats.accounts_monitored.toLocaleString()}
+            hint="in current dataset"
           />
         </div>
 
-        {/* 2. The Five Analyzers (Centerpiece) */}
-        <div className="flex flex-col gap-4">
-          <h2 className="text-base font-semibold text-text">Analyzer Status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-            <AnalyzerCard 
-              analyzer="aml" 
-              count={stats.by_analyzer['aml'] || 0} 
-              metricLabel="Critical Structuring" 
-              metricValue={stats.by_band['critical'] || 0} 
-              topBand={(stats.by_analyzer['aml'] || 0) > 0 ? 'critical' : 'clean'}
-            />
-            <AnalyzerCard 
-              analyzer="reconciliation" 
-              count={stats.by_analyzer['reconciliation'] || 0} 
-              metricLabel="Open Breaks" 
-              metricValue={stats.by_analyzer['reconciliation'] || 0}
-              topBand={(stats.by_analyzer['reconciliation'] || 0) > 0 ? 'high' : 'clean'}
-            />
-            <AnalyzerCard 
-              analyzer="categorization" 
-              count={stats.by_analyzer['categorization'] || 0} 
-              metricLabel="Needs Review" 
-              metricValue={stats.by_analyzer['categorization'] || 0}
-              topBand={(stats.by_analyzer['categorization'] || 0) > 0 ? 'medium' : 'clean'}
-            />
-            <AnalyzerCard 
-              analyzer="disputes" 
-              count={stats.by_analyzer['disputes'] || 0} 
-              metricLabel="Deadlines ≤ 7d" 
-              metricValue={0} // Placeholder for disputes deadline logic
-              topBand={(stats.by_analyzer['disputes'] || 0) > 0 ? 'high' : 'clean'}
-            />
-            <AnalyzerCard 
-              analyzer="reporting" 
-              count={stats.by_analyzer['reporting'] || 0} 
-              metricLabel="SARs Pending" 
-              metricValue={stats.by_analyzer['reporting'] || 0}
-              topBand={(stats.by_analyzer['reporting'] || 0) > 0 ? 'medium' : 'clean'}
-            />
-          </div>
+        {/* 2. The five analyzers — the centerpiece */}
+        <Eyebrow>Analyzer triage</Eyebrow>
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 mb-8">
+          <AnalyzerCard
+            analyzer="aml"
+            count={stats.by_analyzer['aml'] || 0}
+            metricLabel="Critical structuring"
+            metricValue={critical}
+            topBand={(stats.by_analyzer['aml'] || 0) > 0 ? 'critical' : 'clean'}
+          />
+          <AnalyzerCard
+            analyzer="reconciliation"
+            count={stats.by_analyzer['reconciliation'] || 0}
+            metricLabel="Open breaks"
+            metricValue={stats.by_analyzer['reconciliation'] || 0}
+            topBand={(stats.by_analyzer['reconciliation'] || 0) > 0 ? 'high' : 'clean'}
+          />
+          <AnalyzerCard
+            analyzer="categorization"
+            count={stats.by_analyzer['categorization'] || 0}
+            metricLabel="Needs review"
+            metricValue={stats.by_analyzer['categorization'] || 0}
+            topBand={(stats.by_analyzer['categorization'] || 0) > 0 ? 'medium' : 'clean'}
+          />
+          <AnalyzerCard
+            analyzer="disputes"
+            count={stats.by_analyzer['disputes'] || 0}
+            metricLabel="Deadlines ≤ 7d"
+            metricValue={stats.by_analyzer['disputes'] || 0}
+            topBand={(stats.by_analyzer['disputes'] || 0) > 0 ? 'high' : 'clean'}
+          />
+          <AnalyzerCard
+            analyzer="reporting"
+            count={stats.by_analyzer['reporting'] || 0}
+            metricLabel="SARs pending"
+            metricValue={stats.by_analyzer['reporting'] || 0}
+            topBand={(stats.by_analyzer['reporting'] || 0) > 0 ? 'medium' : 'clean'}
+          />
         </div>
 
-        {/* 3. Top Critical Findings Strip */}
-        <div className="flex flex-col gap-4">
-          <h2 className="text-base font-semibold text-text">Top Critical Findings</h2>
-          {isSystemEmpty ? (
-            <EmptyState 
-              icon={Database}
-              title="Awaiting Data"
-              hint="The database is currently empty. Run the analyzers via the CLI to populate the dashboard."
-            />
-          ) : (
-            <FindingsTable findings={topFindings} />
-          )}
-        </div>
+        {/* 3. Review queue */}
+        <Eyebrow>Review queue · highest risk first</Eyebrow>
+        {isSystemEmpty ? (
+          <EmptyState
+            icon={Database}
+            title="Awaiting data"
+            hint="The database is empty. Run the analyzers to populate the queue."
+          />
+        ) : (
+          <FindingsTable findings={topFindings} />
+        )}
       </div>
     );
   } catch (error) {
     return (
       <div className="max-w-7xl mx-auto py-12">
-        <ErrorState message="Could not connect to the backend. The API may be cold-starting or offline." />
+        <ErrorState message="Can't reach the backend — it may be waking up from idle. Retry in a moment." />
       </div>
     );
   }

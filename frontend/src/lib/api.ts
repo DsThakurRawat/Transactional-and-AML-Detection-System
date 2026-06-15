@@ -3,6 +3,8 @@ const API_BASE = rawUrl.replace(/\/+$/, '');
 
 export interface StatsResponse {
   total: number;
+  total_transactions: number;
+  accounts_monitored: number;
   by_analyzer: Record<string, number>;
   by_band: Record<string, number>;
   by_status: Record<string, number>;

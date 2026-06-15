@@ -44,6 +44,8 @@ class FindingResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     total: int
+    total_transactions: int
+    accounts_monitored: int
     by_analyzer: dict[str, int]
     by_band: dict[str, int]
     by_status: dict[str, int]
@@ -107,7 +109,11 @@ def get_top_findings(limit: int = 10, db: Session = Depends(get_db)):
 
 @app.get("/stats", response_model=StatsResponse)
 def get_finding_stats(db: Session = Depends(get_db)):
+    from core.store.models import Transaction
+
     total = db.scalar(select(func.count(Finding.id)))
+    total_transactions = db.scalar(select(func.count(Transaction.transaction_id))) or 0
+    accounts_monitored = db.scalar(select(func.count(func.distinct(Transaction.account_id)))) or 0
     by_analyzer = dict(db.execute(select(Finding.analyzer, func.count(Finding.id)).group_by(Finding.analyzer)).all())
     
     # Handle nullable band
@@ -118,6 +124,8 @@ def get_finding_stats(db: Session = Depends(get_db)):
     
     return StatsResponse(
         total=total or 0,
+        total_transactions=total_transactions,
+        accounts_monitored=accounts_monitored,
         by_analyzer=by_analyzer,
         by_band=by_band,
         by_status=by_status
