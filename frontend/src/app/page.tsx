@@ -17,7 +17,7 @@ export default async function OverviewPage() {
       fetchTopFindings(5)
     ]);
 
-    const isSystemEmpty = stats.total_transactions === 0 && stats.total_findings === 0;
+    const isSystemEmpty = stats.total === 0;
 
     return (
       <div className="flex flex-col gap-8 max-w-7xl mx-auto">
@@ -30,23 +30,23 @@ export default async function OverviewPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard 
             title="Total Transactions" 
-            value={stats.total_transactions.toLocaleString()} 
+            value="--" 
             hint="Ingested payload"
           />
           <StatCard 
             title="Open Findings" 
-            value={stats.total_findings.toLocaleString()} 
+            value={stats.total.toLocaleString()} 
             hint="Across all analyzers"
           />
           <StatCard 
             title="Critical Risk" 
-            value={stats.critical_findings.toLocaleString()} 
+            value={(stats.by_band['critical'] || 0).toLocaleString()} 
             band="critical"
             hint="Requires immediate action"
           />
           <StatCard 
             title="Accounts Monitored" 
-            value={stats.active_accounts.toLocaleString()} 
+            value="--" 
           />
         </div>
 
@@ -56,38 +56,38 @@ export default async function OverviewPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
             <AnalyzerCard 
               analyzer="aml" 
-              count={stats.by_analyzer.aml || 0} 
+              count={stats.by_analyzer['aml'] || 0} 
               metricLabel="Critical Structuring" 
-              metricValue={stats.critical_findings} 
-              topBand={stats.by_analyzer.aml > 0 ? 'critical' : 'clean'}
+              metricValue={stats.by_band['critical'] || 0} 
+              topBand={(stats.by_analyzer['aml'] || 0) > 0 ? 'critical' : 'clean'}
             />
             <AnalyzerCard 
               analyzer="reconciliation" 
-              count={stats.by_analyzer.reconciliation || 0} 
+              count={stats.by_analyzer['reconciliation'] || 0} 
               metricLabel="Open Breaks" 
-              metricValue={stats.by_analyzer.reconciliation || 0}
-              topBand={stats.by_analyzer.reconciliation > 0 ? 'high' : 'clean'}
+              metricValue={stats.by_analyzer['reconciliation'] || 0}
+              topBand={(stats.by_analyzer['reconciliation'] || 0) > 0 ? 'high' : 'clean'}
             />
             <AnalyzerCard 
               analyzer="categorization" 
-              count={stats.by_analyzer.categorization || 0} 
+              count={stats.by_analyzer['categorization'] || 0} 
               metricLabel="Needs Review" 
-              metricValue={stats.by_analyzer.categorization || 0}
-              topBand={stats.by_analyzer.categorization > 0 ? 'medium' : 'clean'}
+              metricValue={stats.by_analyzer['categorization'] || 0}
+              topBand={(stats.by_analyzer['categorization'] || 0) > 0 ? 'medium' : 'clean'}
             />
             <AnalyzerCard 
               analyzer="disputes" 
-              count={stats.by_analyzer.disputes || 0} 
+              count={stats.by_analyzer['disputes'] || 0} 
               metricLabel="Deadlines ≤ 7d" 
               metricValue={0} // Placeholder for disputes deadline logic
-              topBand={stats.by_analyzer.disputes > 0 ? 'high' : 'clean'}
+              topBand={(stats.by_analyzer['disputes'] || 0) > 0 ? 'high' : 'clean'}
             />
             <AnalyzerCard 
               analyzer="reporting" 
-              count={stats.by_analyzer.reporting || 0} 
+              count={stats.by_analyzer['reporting'] || 0} 
               metricLabel="SARs Pending" 
-              metricValue={stats.by_analyzer.reporting || 0}
-              topBand={stats.by_analyzer.reporting > 0 ? 'medium' : 'clean'}
+              metricValue={stats.by_analyzer['reporting'] || 0}
+              topBand={(stats.by_analyzer['reporting'] || 0) > 0 ? 'medium' : 'clean'}
             />
           </div>
         </div>
