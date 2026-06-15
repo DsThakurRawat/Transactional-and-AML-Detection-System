@@ -1,51 +1,52 @@
 # Transaction Intelligence Platform
 
-A pluggable **transaction-analysis platform** that runs five independent fintech analyzers over the same payment data and surfaces everything they find in one unified review queue.
+> A pluggable platform that runs **five independent fintech analyzers** over the same payment data and surfaces everything they find in one unified review queue. One backbone, five swappable brains, one contract.
 
-It is **not** a single fraud tool — it's a platform with a shared backbone (`core/`) and five swappable analyzers (`analyzers/`), each implementing one contract and emitting findings into one place. Adding a sixth analyzer is dropping in a module, not rewiring the system.
+| # | Analyzer | Detects / does | Technique | Metric |
+|---|---|---|---|---|
+| 1 | **AML** | fraud + laundering (structuring, velocity, geo, large-amount) | rules + baselines + ML ensemble + LLM explain | PR-AUC / Recall |
+| 2 | **Reconciliation** | breaks between ledger and processor | fuzzy matching + discrepancy typing + LLM | Precision / Recall |
+| 3 | **Categorization** | merchant category / purpose code | normalize → lookup → TF-IDF + NB | Macro-F1 |
+| 4 | **Disputes** | chargeback lifecycle + deadlines + rebuttals | reason-code FSM + LLM draft | Win rate |
+| 5 | **Reporting** | SAR narratives from other analyzers' findings | grounded LLM + faithfulness check | Grounding |
 
-## The five analyzers
+---
 
-| Analyzer | What it does | Technique | Evaluation metric |
-|---|---|---|---|
-| **AML** | Flags fraud + money-laundering patterns (structuring, velocity, geo, large-amount) | Rules + behavioral baselines + ML ensemble (Isolation Forest + LightGBM) + LLM explanations | Precision / Recall / F1 / PR-AUC (imbalanced → no accuracy) |
-| **Reconciliation** | Matches two sources (ledger vs. processor) and flags every break | Exact + fuzzy matching, discrepancy typing, LLM break-explanation | Precision / Recall on injected breaks |
-| **Categorization** | Classifies each transaction's merchant category / purpose code from messy descriptions | Description normalization → lookup table → TF-IDF + Naive Bayes | Macro-F1 + confusion matrix (balanced → accuracy OK) |
-| **Disputes** | Tracks chargeback lifecycle, deadlines, and drafts rebuttals | Reason-code→evidence map + state machine + LLM rebuttal draft | Workflow metrics (win rate, deadline handling) |
-| **Reporting** | Auto-drafts SAR narratives from the other analyzers' findings | Grounded LLM generation + faithfulness self-check + human-in-loop | Grounding / completeness (generative → no precision/recall) |
+## 1. System architecture
 
-> **Design principle:** detection and matching are **deterministic**; the LLM only **explains, drafts, and checks** — it never decides a transaction is fraud, never resolves a break, and never files a report. Every generated artifact is `pending_review`.
-
-## How it fits together
+The whole platform on one screen — sources flow into the backbone, the backbone runs the five analyzers, every analyzer writes into one unified `Finding` store, and the API + dashboard surface it.
 
 ```mermaid
 flowchart TB
-    subgraph SRC["Data Sources"]
-        TX["Transactions (CSV / synthetic)"]
-        LP["Ledger + Processor (two sources)"]
+    subgraph SRC["DATA SOURCES"]
+        direction LR
+        TX["Transactions"]
+        LP["Ledger + Processor"]
         DP["Disputes"]
     end
 
-    subgraph CORE["core/ - Platform Backbone"]
+    subgraph CORE["CORE — platform backbone"]
+        direction TB
         ING["Ingestion (loader + adapters)"]
-        DB[("Store: Transactions / Findings / AuditLog")]
         REG["Analyzer Registry"]
         PIPE["Pipeline Runner"]
-        LLM["Groq LLM Client (explain / draft / check only)"]
+        LLM["Groq LLM (explain / draft / check ONLY)"]
+        DB[("Store: Transactions / Findings / AuditLog")]
     end
 
-    subgraph AN["analyzers/ - 5 Pluggable Analyzers"]
-        AML["AML: rules / baselines / ensemble ML"]
-        RC["Reconciliation: match / discrepancy types"]
-        CT["Categorization: normalize / lookup / TF-IDF+NB"]
-        DS["Disputes: reason-code FSM / deadlines"]
-        RP["Reporting: grounded SAR / faithfulness check"]
+    subgraph AN["FIVE PLUGGABLE ANALYZERS"]
+        direction LR
+        AML["1 AML"]
+        RC["2 Reconciliation"]
+        CT["3 Categorization"]
+        DS["4 Disputes"]
+        RP["5 Reporting"]
     end
 
-    subgraph OUT["Surfacing"]
-        FND[("Unified Findings")]
+    subgraph OUT["SURFACING"]
+        direction LR
         API["FastAPI: /findings /stats /graph"]
-        UI["Next.js Dashboard: review queue + network graph"]
+        UI["Next.js Dashboard + Network Graph"]
     end
 
     TX --> ING
@@ -59,111 +60,352 @@ flowchart TB
     PIPE --> CT
     PIPE --> DS
     PIPE --> RP
-    AML --> FND
-    RC --> FND
-    CT --> FND
-    DS --> FND
-    RP --> FND
+    AML --> DB
+    RC --> DB
+    CT --> DB
+    DS --> DB
+    RP --> DB
     AML -.-> LLM
     DS -.-> LLM
     RP -.-> LLM
-    RP -. consumes .-> FND
-    FND --> API
+    RP -. reads findings .-> DB
     DB --> API
     API --> UI
+
+    classDef src fill:#EAF2F8,stroke:#3E7CA8,color:#15213B
+    classDef core fill:#E8EEF7,stroke:#27406B,color:#15213B
+    classDef anlz fill:#27406B,stroke:#15213B,color:#ffffff
+    classDef out fill:#E7F4EF,stroke:#2E8B6F,color:#15213B
+    class TX,LP,DP src
+    class ING,REG,PIPE,LLM,DB core
+    class AML,RC,CT,DS,RP anlz
+    class API,UI out
 ```
 
-**Traceability — how any of the five is tracked:** every analyzer writes into the **same `Finding` table** (`analyzer`, `entity_id`, `finding_type`, `score`, `band`, `status`, `summary`, `explanation`, `payload`). So a flagged AML transaction, a reconciliation break, a low-confidence categorization, a dispute nearing its deadline, and a drafted SAR all appear in one queue — filterable by analyzer, severity, and status — each linking back to the evidence that produced it. The `Reporting` analyzer closes the loop by *consuming* other analyzers' findings to draft its narratives.
+---
 
-### AML detection pipeline (the deepest analyzer)
+## 2. The contract that makes it pluggable
+
+Every analyzer implements **one interface**. That is the entire architecture — add a sixth analyzer by dropping in a class, not by rewiring the system.
+
+```mermaid
+classDiagram
+    class Analyzer {
+        <<interface>>
+        +str name
+        +required_inputs() list~str~
+        +run(session, config) RunResult
+        +evaluate(session) str
+    }
+    class AMLAnalyzer
+    class ReconciliationAnalyzer
+    class CategorizationAnalyzer
+    class DisputeAnalyzer
+    class ReportingAnalyzer
+
+    Analyzer <|.. AMLAnalyzer
+    Analyzer <|.. ReconciliationAnalyzer
+    Analyzer <|.. CategorizationAnalyzer
+    Analyzer <|.. DisputeAnalyzer
+    Analyzer <|.. ReportingAnalyzer
+
+    class RunResult {
+        +int findings_created
+        +str message
+    }
+    class Finding {
+        +str id
+        +str analyzer
+        +str entity_id
+        +str finding_type
+        +Decimal score
+        +str band
+        +str status
+        +str summary
+        +str explanation
+        +dict payload_json
+    }
+    AMLAnalyzer ..> Finding : emits
+    ReconciliationAnalyzer ..> Finding : emits
+    CategorizationAnalyzer ..> Finding : emits
+    DisputeAnalyzer ..> Finding : emits
+    ReportingAnalyzer ..> Finding : emits
+```
+
+---
+
+## 3. Traceability — how any of the five is tracked
+
+Every analyzer writes into the **same `Finding` table**, so a flagged transaction, a reconciliation break, a low-confidence category, a dispute deadline, and a drafted SAR all land in one queue — each traceable back to the evidence that produced it.
 
 ```mermaid
 flowchart LR
-    T["Transaction"] --> R["Rule Engine: velocity / structuring / geo / large-amount"]
-    T --> B["Behavioral Baseline: per-account median/MAD"]
-    T --> F["Feature Builder: + graph features"]
-    B --> F
-    F --> E["ML Ensemble: Isolation Forest + LightGBM"]
-    R --> S["Risk Scorer: weighted 0-100"]
-    E --> S
-    S --> BD["Severity Band: low / medium / high / critical"]
-    BD --> FN["Finding"]
-    FN --> X["LLM Explanation: plain-English + suggested action"]
+    IN["Raw input<br/>(txn / ledger pair / dispute)"] --> A["Analyzer.run()"]
+    A --> EV["Evidence assembled<br/>(rules / scores / records)"]
+    EV --> F["FINDING written<br/>analyzer + entity_id + type + score + band"]
+    F --> Q["Unified review queue<br/>filter by analyzer / severity / status"]
+    Q --> H["Human review"]
+    H --> RES["Resolved / actioned"]
+    F -.-> API["/findings/{id} -> full evidence trail"]
 ```
 
-## Tech stack
+A finding moves through an explicit status lifecycle:
 
-- **Backend:** Python · FastAPI · Typer (CLI) · SQLAlchemy · pandas · scikit-learn · LightGBM
-- **AI:** Groq (Llama 3.1) for explanations/drafts — config-driven model, graceful degradation if absent
-- **Frontend:** Next.js 15 · React · TypeScript · Tailwind · a force-directed network graph
-- **Data:** seeded synthetic generators (reproducible) + a Kaggle adapter for external validation
-
-## Project structure
-
+```mermaid
+stateDiagram-v2
+    [*] --> open: analyzer emits
+    open --> needs_review: low confidence / threshold
+    open --> pending_review: LLM-drafted artifact (SAR / rebuttal)
+    needs_review --> resolved: analyst actions
+    pending_review --> resolved: human signs off
+    resolved --> [*]
+    note right of pending_review
+        LLM never auto-resolves
+        or files — human required
+    end note
 ```
-core/          platform backbone (Analyzer contract, registry, pipeline, store, ingest, llm)
-analyzers/     the five analyzers: aml/ reconciliation/ categorization/ disputes/ reporting/
-data/          synthetic data generators (transactions, reconciliation, disputes) + Kaggle adapter
-interface/     cli.py (Typer) and api.py (FastAPI)
-frontend/      Next.js dashboard
-tests/         per-analyzer test suites
+
+---
+
+## 4. Data model
+
+The shared `Finding` is the spine; each analyzer keeps its own domain tables for detail.
+
+```mermaid
+erDiagram
+    TRANSACTIONS ||--o{ FINDINGS : "entity_id"
+    ANALYZER_RUNS ||--o{ FINDINGS : "run_id"
+    TRANSACTIONS ||--o| ACCOUNT_BASELINES : "account_id"
+    LEDGER_ENTRIES ||--o{ DISCREPANCIES : "produces"
+    DISPUTES ||--o{ FINDINGS : "entity_id"
+    FINDINGS ||--o{ REPORTS : "feeds SAR"
+
+    TRANSACTIONS {
+        string transaction_id PK
+        string account_id
+        string counterparty_account
+        decimal amount
+        string merchant
+        string country
+        datetime timestamp
+    }
+    FINDINGS {
+        string id PK
+        string analyzer
+        int run_id FK
+        string entity_type
+        string entity_id
+        string finding_type
+        decimal score
+        string band
+        string status
+        string summary
+        string explanation
+        json payload_json
+    }
+    ANALYZER_RUNS {
+        int id PK
+        string analyzer_name
+        datetime started_at
+    }
+    ACCOUNT_BASELINES {
+        string account_id PK
+        decimal amount_median
+        decimal amount_mad
+        json seen_countries
+    }
+    LEDGER_ENTRIES {
+        string id PK
+        string source
+        string external_ref
+        decimal amount
+        string status
+    }
+    DISCREPANCIES {
+        string id PK
+        string type
+        decimal amount_diff
+    }
+    DISPUTES {
+        string dispute_id PK
+        string transaction_id
+        string reason_code
+        string status
+        datetime deadline
+    }
+    REPORTS {
+        string report_id PK
+        string entity_id
+        string status
+    }
 ```
+
+---
+
+## 5. The five analyzers — one pipeline each
+
+Same contract, five completely different brains. Each gets equal depth below.
+
+### 1 — AML  ·  *rules + baselines + ensemble ML + LLM*
+
+```mermaid
+flowchart LR
+    T["Transaction"] --> R["Rule Engine<br/>velocity / structuring / geo / large-amount"]
+    T --> B["Behavioral Baseline<br/>per-account median + MAD"]
+    T --> FE["Feature Builder<br/>+ graph features (fan-in/out)"]
+    B --> FE
+    FE --> EN["ML Ensemble<br/>Isolation Forest + LightGBM"]
+    R --> SC["Risk Scorer<br/>weighted 0-100"]
+    EN --> SC
+    SC --> BD["Severity Band"]
+    BD --> F["FINDING"]
+    F --> X["LLM Explanation<br/>plain-English + suggested action"]
+```
+
+### 2 — Reconciliation  ·  *matching + discrepancy typing + LLM*
+
+```mermaid
+flowchart LR
+    L["Internal Ledger"] --> N["Normalize refs<br/>+ date tolerance"]
+    P["Processor"] --> N
+    N --> M{"Match?"}
+    M -->|exact / fuzzy| OK["Matched"]
+    M -->|no match| D["Classify discrepancy"]
+    D --> D1["missing_internal / missing_processor"]
+    D --> D2["amount_mismatch"]
+    D --> D3["duplicate_processor"]
+    D --> D4["status_mismatch"]
+    D1 --> F["FINDING"]
+    D2 --> F
+    D3 --> F
+    D4 --> F
+    F --> X["LLM: explains the likely cause of the break"]
+```
+
+### 3 — Categorization  ·  *normalize → lookup → ML*
+
+```mermaid
+flowchart LR
+    M["Messy merchant string<br/>'PAYPAL *AMZN MKTP #445'"] --> NZ["Normalize<br/>strip prefixes/suffixes/punct"]
+    NZ --> L{"In lookup table?"}
+    L -->|yes| C1["Category (conf 1.0)"]
+    L -->|no| ML["TF-IDF + Naive Bayes"]
+    ML --> CF{"Confidence high?"}
+    CF -->|yes| C2["Category"]
+    CF -->|low| NR["FINDING: needs_review"]
+```
+
+### 4 — Disputes  ·  *reason-code FSM + deadlines + LLM rebuttal*
+
+```mermaid
+flowchart LR
+    DP["Dispute"] --> RC["Reason code -> required evidence map"]
+    RC --> DL{"Deadline approaching?"}
+    DL -->|yes| URG["FINDING: urgent_deadline"]
+    RC --> RB["LLM drafts rebuttal<br/>(legal-brief tone, evidence-matched)"]
+    RB --> PR["FINDING: pending_review"]
+    DP --> ST["State: open -> submitted -> won/lost"]
+    ST --> WR["Win-rate metric"]
+```
+
+State machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> open
+    open --> evidence_gathering: reason-code evidence assembled
+    evidence_gathering --> submitted: rebuttal drafted + filed (human)
+    submitted --> won
+    submitted --> lost
+    won --> [*]
+    lost --> [*]
+```
+
+### 5 — Reporting  ·  *grounded SAR + faithfulness check (the capstone)*
+
+```mermaid
+flowchart LR
+    FND["Other analyzers' FINDINGS<br/>(AML especially)"] --> EV["Assemble evidence (JSON)"]
+    EV --> GEN["LLM drafts SAR<br/>'use ONLY this evidence'"]
+    GEN --> CHK["Faithfulness check<br/>'anything NOT in evidence?'"]
+    CHK -->|clean| OK["FINDING: pending_review"]
+    CHK -->|hallucination| FLAG["FINDING: pending_review + failed_grounding"]
+    OK --> HUM["Human signs off -> file"]
+    FLAG --> HUM
+```
+
+---
+
+## 6. Deployment topology
+
+Frontend on Vercel; the Python/ML backend on a container host with Postgres. (Vercel cannot host the stateful FastAPI + ML backend — see `DEPLOYMENT.md`.)
+
+```mermaid
+flowchart LR
+    U["Browser"] --> V["VERCEL<br/>Next.js dashboard"]
+    V -->|"NEXT_PUBLIC_API_URL + CORS"| B["CONTAINER HOST<br/>FastAPI + analyzers + ML"]
+    B --> PG[("Managed Postgres")]
+    B -.->|"explain / draft / check"| G["Groq API"]
+    GH["GitHub Actions CI<br/>pytest on every PR"] -.-> B
+
+    classDef fe fill:#E8EEF7,stroke:#27406B,color:#15213B
+    classDef be fill:#27406B,stroke:#15213B,color:#ffffff
+    classDef ext fill:#FAF5E6,stroke:#C29A2E,color:#15213B
+    class V fe
+    class B be
+    class PG,G,GH ext
+```
+
+---
+
+## 7. Runtime — opening a flagged item
+
+```mermaid
+sequenceDiagram
+    actor Analyst
+    participant UI as Dashboard
+    participant API as FastAPI
+    participant DB as Store
+    Analyst->>UI: open review queue
+    UI->>API: GET /findings?band=critical
+    API->>DB: query findings
+    DB-->>API: findings
+    API-->>UI: JSON
+    Analyst->>UI: click a finding
+    UI->>API: GET /findings/{id}
+    API->>DB: finding + evidence + explanation
+    DB-->>API: detail
+    API-->>UI: full evidence trail
+    UI-->>Analyst: render (score, rules, LLM explanation)
+```
+
+---
 
 ## Quickstart
 
 ```bash
-# 1. Install (uv)
 uv sync
-
-# 2. Generate synthetic data + ingest
 uv run python -m interface.cli generate --accounts 50 --days 30 --out data.csv
 uv run python -m interface.cli ingest data.csv
-
-# 3. Run an analyzer (aml / reconciliation / categorization / disputes / reporting)
-uv run python -m interface.cli run aml
-
-# 4. Train the AML ensemble, then view findings
+uv run python -m interface.cli run aml            # aml | reconciliation | categorization | disputes | reporting
 uv run python -m interface.cli train --labels data.csv
-uv run python -m interface.cli findings --band critical
-
-# 5. Regenerate the combined scorecard across all analyzers
-uv run python -m interface.cli evaluate
+uv run python -m interface.cli evaluate           # regenerate the combined SCORECARD.md
+uv run uvicorn interface.api:app --reload         # API
+cd frontend && npm install && npm run dev         # dashboard (set NEXT_PUBLIC_API_URL)
 ```
 
-### API
+## Scorecard (per analyzer, the right metric for each)
 
-```bash
-uv run uvicorn interface.api:app --reload
-# GET /findings  /findings/top  /findings/{id}  /stats  /accounts/top  /graph  /health
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-# set NEXT_PUBLIC_API_URL to the backend (e.g. http://localhost:8000)
-npm run dev
-```
-
-## Scorecard
-
-Each analyzer is evaluated with the *appropriate* metric for its type (see `SCORECARD.md`, regenerated via `evaluate`):
-
-| Analyzer | Headline result |
+| Analyzer | Headline (synthetic data; regenerate via `evaluate`) |
 |---|---|
-| **AML** | ML ensemble lifts recall ~+10pts over rules (~50% -> ~60%), F1 up, geo/structuring/large-amount detected; honest precision tradeoff |
-| **Reconciliation** | ~84% recall at 100% precision on injected breaks |
-| **Categorization** | Macro-F1 baseline (lightweight TF-IDF + NB; trained on a bootstrap set) |
-| **Disputes** | Workflow metrics — win rate, open/closed, deadline tracking |
-| **Reporting** | Grounded SAR drafts with a faithfulness check (requires a Groq key to run) |
+| AML | ensemble lift ~+9.6pts recall over rules (~50.0% -> ~59.6%), F1 ~0.702 |
+| Reconciliation | ~84.4% recall at 100% precision on injected breaks |
+| Categorization | macro-F1 ~0.51 (lightweight TF-IDF + NB) |
+| Disputes | workflow metrics — 42.9% win rate, 37 open |
+| Reporting | grounded SAR drafts with a faithfulness check (needs a Groq key) |
 
-*All numbers are on synthetic data; the Kaggle adapter provides external validation for AML. Keep this table in sync with `SCORECARD.md` — both come from the same `evaluate` run.*
+*Keep this in sync with `SCORECARD.md` — both come from one `evaluate` run.*
 
-## Documentation
+## Docs
 
-- [`spec.md`](./spec.md) — technical specification (analyzers, data flow, the `Analyzer` contract, the `Finding` model, evaluation)
-- [`AGENTS.md`](./AGENTS.md) — guide for AI agents and contributors (conventions, how to add an analyzer, the disciplines)
-- [`CLAUDE.md`](./CLAUDE.md) — Claude-specific quick reference
-- [`DEPLOYMENT.md`](./DEPLOYMENT.md) — deploying the frontend (Vercel) and backend (separate host + Postgres)
-- [`Roadmap.md`](./Roadmap.md) — phase history
+`spec.md` (technical spec) · `AGENTS.md` (contributor + agent guide) · `CLAUDE.md` (Claude quick ref) · `DEPLOYMENT.md` (Vercel + backend) · `Roadmap.md` (phase history)
