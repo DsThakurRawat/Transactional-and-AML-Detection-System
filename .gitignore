@@ -52,3 +52,4 @@ models/
 error.log
 out.log
 synthetic_data.csv
+data.csv
