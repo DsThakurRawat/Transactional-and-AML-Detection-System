@@ -67,22 +67,24 @@ def get_top_transactions(session: Session, limit: int = 10) -> list[Score]:
 
 def get_top_accounts(session: Session, limit: int = 10) -> list[tuple[str, int, int]]:
     """
-    Get the top riskiest accounts by computing the max score and counting critical flags.
+    Get the top riskiest accounts by computing max score and counting critical flags from Findings.
     Returns list of tuples: (account_id, max_score, critical_count).
     """
+    from core.store.models import Finding
     stmt = (
         select(
-            Score.account_id,
-            func.max(Score.score).label("max_score"),
+            Finding.entity_id.label("account_id"),
+            func.max(func.coalesce(Finding.score, 0)).label("max_score"),
             func.sum(
                 case(
-                    (Score.band == "critical", 1),
+                    (Finding.band == "critical", 1),
                     else_=0
                 )
             ).label("critical_count")
         )
-        .group_by(Score.account_id)
-        .order_by(func.max(Score.score).desc())
+        .where(Finding.entity_type == "account")
+        .group_by(Finding.entity_id)
+        .order_by(func.max(func.coalesce(Finding.score, 0)).desc())
         .limit(limit)
     )
     

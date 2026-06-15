@@ -158,18 +158,32 @@ def api_get_top_accounts(limit: int = 10, db: Session = Depends(get_db)):
 
 @app.get("/graph")
 def api_get_graph(limit: int = 500, db: Session = Depends(get_db)):
-    from core.store.models import Score, Transaction
-    scores = db.scalars(select(Score).order_by(desc(Score.score)).limit(limit)).all()
+    from core.store.models import Finding, Transaction
+    findings = db.scalars(select(Finding).where(Finding.band.in_(["critical", "high"])).limit(limit)).all()
     
     nodes_map = {}
     edges = []
     
-    for s in scores:
-        tx = db.scalar(select(Transaction).where(Transaction.transaction_id == s.transaction_id))
-        if tx and tx.counterparty_account:
-            nodes_map[tx.account_id] = max(nodes_map.get(tx.account_id, 0), s.score)
-            nodes_map[tx.counterparty_account] = max(nodes_map.get(tx.counterparty_account, 0), s.score / 2)
+    for f in findings:
+        if f.entity_type == "account":
+            nodes_map[f.entity_id] = max(nodes_map.get(f.entity_id, 0), float(f.score or 0))
             
+    if not nodes_map:
+        txs = db.scalars(select(Transaction).where(Transaction.counterparty_account.isnot(None)).limit(100)).all()
+        for tx in txs:
+            nodes_map[tx.account_id] = 10
+            nodes_map[tx.counterparty_account] = 5
+            edges.append({
+                "source": tx.account_id,
+                "target": tx.counterparty_account,
+                "amount": float(tx.amount),
+                "transaction_id": tx.transaction_id
+            })
+    else:
+        account_ids = list(nodes_map.keys())
+        txs = db.scalars(select(Transaction).where(Transaction.account_id.in_(account_ids)).where(Transaction.counterparty_account.isnot(None)).limit(limit)).all()
+        for tx in txs:
+            nodes_map[tx.counterparty_account] = max(nodes_map.get(tx.counterparty_account, 0), nodes_map.get(tx.account_id, 0) / 2)
             edges.append({
                 "source": tx.account_id,
                 "target": tx.counterparty_account,
