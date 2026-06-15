@@ -16,7 +16,7 @@ app = FastAPI(title="Platform API", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -44,6 +44,8 @@ class FindingResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     total: int
+    total_transactions: int
+    accounts_monitored: int
     by_analyzer: dict[str, int]
     by_band: dict[str, int]
     by_status: dict[str, int]
@@ -107,7 +109,11 @@ def get_top_findings(limit: int = 10, db: Session = Depends(get_db)):
 
 @app.get("/stats", response_model=StatsResponse)
 def get_finding_stats(db: Session = Depends(get_db)):
+    from core.store.models import Transaction
+
     total = db.scalar(select(func.count(Finding.id)))
+    total_transactions = db.scalar(select(func.count(Transaction.transaction_id))) or 0
+    accounts_monitored = db.scalar(select(func.count(func.distinct(Transaction.account_id)))) or 0
     by_analyzer = dict(db.execute(select(Finding.analyzer, func.count(Finding.id)).group_by(Finding.analyzer)).all())
     
     # Handle nullable band
@@ -118,6 +124,8 @@ def get_finding_stats(db: Session = Depends(get_db)):
     
     return StatsResponse(
         total=total or 0,
+        total_transactions=total_transactions,
+        accounts_monitored=accounts_monitored,
         by_analyzer=by_analyzer,
         by_band=by_band,
         by_status=by_status
@@ -158,18 +166,32 @@ def api_get_top_accounts(limit: int = 10, db: Session = Depends(get_db)):
 
 @app.get("/graph")
 def api_get_graph(limit: int = 500, db: Session = Depends(get_db)):
-    from core.store.models import Score, Transaction
-    scores = db.scalars(select(Score).order_by(desc(Score.score)).limit(limit)).all()
+    from core.store.models import Finding, Transaction
+    findings = db.scalars(select(Finding).where(Finding.band.in_(["critical", "high"])).limit(limit)).all()
     
     nodes_map = {}
     edges = []
     
-    for s in scores:
-        tx = db.scalar(select(Transaction).where(Transaction.transaction_id == s.transaction_id))
-        if tx and tx.counterparty_account:
-            nodes_map[tx.account_id] = max(nodes_map.get(tx.account_id, 0), s.score)
-            nodes_map[tx.counterparty_account] = max(nodes_map.get(tx.counterparty_account, 0), s.score / 2)
+    for f in findings:
+        if f.entity_type == "account":
+            nodes_map[f.entity_id] = max(nodes_map.get(f.entity_id, 0), float(f.score or 0))
             
+    if not nodes_map:
+        txs = db.scalars(select(Transaction).where(Transaction.counterparty_account.isnot(None)).limit(100)).all()
+        for tx in txs:
+            nodes_map[tx.account_id] = 10
+            nodes_map[tx.counterparty_account] = 5
+            edges.append({
+                "source": tx.account_id,
+                "target": tx.counterparty_account,
+                "amount": float(tx.amount),
+                "transaction_id": tx.transaction_id
+            })
+    else:
+        account_ids = list(nodes_map.keys())
+        txs = db.scalars(select(Transaction).where(Transaction.account_id.in_(account_ids)).where(Transaction.counterparty_account.isnot(None)).limit(limit)).all()
+        for tx in txs:
+            nodes_map[tx.counterparty_account] = max(nodes_map.get(tx.counterparty_account, 0), nodes_map.get(tx.account_id, 0) / 2)
             edges.append({
                 "source": tx.account_id,
                 "target": tx.counterparty_account,
