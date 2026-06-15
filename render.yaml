@@ -5,7 +5,7 @@ services:
     plan: free
     # Uv makes dependency installation fast. Using the bash script below:
     buildCommand: "pip install uv && uv sync"
-    startCommand: "uv run uvicorn interface.api:app --host 0.0.0.0 --port $PORT"
+    startCommand: "uv run python -m interface.cli generate --accounts 50 --days 30 --out data.csv && uv run python -m interface.cli ingest data.csv && uv run python -m interface.cli run aml && uv run uvicorn interface.api:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
         sync: false
