@@ -31,14 +31,9 @@ This scorecard evaluates the end-to-end performance of all platform analyzers.
 
 
 ## ReconciliationAnalyzer
-```
-Reconciliation Evaluation:
-Total Anomalies Injected: 96
-Total Flagged by Matcher: 81
-Recall: 84.4%
-Precision: 100.0%
+Failed to evaluate: (psycopg2.OperationalError) could not translate host name "...your-managed-postgres..." to address: Name or service not known
 
-```
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
 
 
 ## CategorizationAnalyzer
@@ -58,16 +53,12 @@ Confusion Matrix:
 
 
 ## DisputeAnalyzer
-```
-Dispute Workflow Metrics:
-Total Disputes: 100
-Open: 37
-Win Rate: 42.9% (27 won, 36 lost)
+Failed to evaluate: (psycopg2.OperationalError) could not translate host name "...your-managed-postgres..." to address: Name or service not known
 
-```
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
 
 
 ## ReportingAnalyzer
-```
-No reports to evaluate.
-```
+Failed to evaluate: (psycopg2.OperationalError) could not translate host name "...your-managed-postgres..." to address: Name or service not known
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)

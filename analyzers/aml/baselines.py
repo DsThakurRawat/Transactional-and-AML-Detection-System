@@ -30,11 +30,11 @@ def compute_baselines(session: Session) -> None:
     baselines = []
     for account_id, group in grouped:
         tx_count = len(group)
-        amount_median = group['amount'].median()
+        amount_median = float(group['amount'].median())
         
         # MAD = median(|x_i - median(X)|)
         # Add a tiny epsilon to MAD to avoid division by zero later for constant-amount accounts
-        amount_mad = (group['amount'] - amount_median).abs().median()
+        amount_mad = float((group['amount'] - amount_median).abs().median())
         amount_mad = max(amount_mad, 0.01) 
         
         # Robust sets: filter out one-offs that might be the anomaly itself
